@@ -4,6 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>QRIS Scanner</title>
+
+  <!-- Tema & layout -->
   <style>
     :root{ --orange:#da3c3e; --bg:#f2efed; --header:#fff0e6; }
     *,*::before,*::after{ box-sizing:border-box; }
@@ -44,7 +46,12 @@
       border:1px solid #f5b2a2; background:#fff7f2; color:#8c2a15; border-radius:10px; text-align:center; font-weight:700}
     .kbd{padding:2px 6px;border:1px solid #ddd;border-bottom-width:2px;border-radius:6px;background:#fafafa;font-family:ui-monospace,monospace}
   </style>
+
+  <!-- jsQR untuk baca QR -->
   <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+  <!-- Cropper.js untuk crop/snipping -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cropperjs@1.6.2/dist/cropper.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/cropperjs@1.6.2/dist/cropper.min.js"></script>
 </head>
 <body>
   <div class="center">
@@ -77,7 +84,24 @@
     </div>
   </div>
 
+  <!-- Crop Modal -->
+  <div id="cropModal" style="
+    position:fixed; inset:0; display:none; place-items:center;
+    background:rgba(0,0,0,.5); z-index:9999;">
+    <div style="background:#fff; border-radius:12px; padding:16px; width:min(92vw, 980px); max-height:92vh; display:grid; gap:12px;">
+      <div style="font-weight:700; color:#333;">Pilih area QR yang mau di-scan</div>
+      <div style="overflow:auto; max-height:70vh;">
+        <img id="cropImg" style="max-width:100%; display:block;">
+      </div>
+      <div style="display:flex; gap:8px; justify-content:flex-end;">
+        <button id="cropCancel" class="btn secondary">Batal</button>
+        <button id="cropUse" class="btn">Gunakan Area</button>
+      </div>
+    </div>
+  </div>
+
 <script>
+/* ====== Helper DOM ====== */
 const $ = id => document.getElementById(id);
 const fileInput = $('fileInput');
 const table = $('resultTable');
@@ -89,7 +113,7 @@ const screenBtn = $('screenBtn');
 const clipBtn = $('clipBtn');
 const osHint = $('osHint');
 
-/* Hint OS */
+/* ====== OS hint ====== */
 (() => {
   const isMac = navigator.platform.toLowerCase().includes('mac');
   osHint.innerHTML = isMac
@@ -97,13 +121,12 @@ const osHint = $('osHint');
     : `Tips cepat: tekan <span class="kbd">Win</span>+<span class="kbd">Shift</span>+<span class="kbd">S</span> lalu <b>Ctrl + V</b> di sini (paste).`;
 })();
 
-/* Upload */
+/* ====== Upload & drag/drop & paste ====== */
 fileInput.addEventListener('change', () => {
   const f = fileInput.files[0];
-  if (f) handleFile(f);
+  if (f) handleBlobAsFile(f, f.name || 'upload.png');
 });
 
-/* Drag & drop */
 ['dragenter','dragover'].forEach(ev =>
   document.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('drag'); })
 );
@@ -112,10 +135,9 @@ fileInput.addEventListener('change', () => {
 );
 document.addEventListener('drop', e => {
   const f = e.dataTransfer?.files?.[0];
-  if (f) handleFile(f);
+  if (f) handleBlobAsFile(f, f.name || 'drop.png');
 });
 
-/* Paste (clipboard) */
 window.addEventListener('paste', e => {
   const items = e.clipboardData?.items || [];
   for (const it of items) {
@@ -127,7 +149,7 @@ window.addEventListener('paste', e => {
   }
 });
 
-/* Clipboard API (button) */
+/* ====== Clipboard API button ====== */
 clipBtn.addEventListener('click', async () => {
   try{
     if (!navigator.clipboard?.read) throw new Error('Browser belum mengizinkan akses clipboard gambar.');
@@ -140,7 +162,7 @@ clipBtn.addEventListener('click', async () => {
   }catch(e){ showError(e.message || 'Clipboard tidak dapat diakses.'); }
 });
 
-/* Capture (Screen) */
+/* ====== Screen capture ====== */
 let deniedCount = 0;
 screenBtn.addEventListener('click', () => {
   if (!navigator.mediaDevices?.getDisplayMedia) {
@@ -197,11 +219,75 @@ async function frameFromVideo(stream){
   return await createImageBitmap(c);
 }
 
-/* Pipeline */
-async function handleBlobAsFile(blob, filename) {
-  const file = new File([blob], filename, { type: blob.type || 'image/png' });
-  await handleFile(file);
+/* ====== Cropper (snipping) ====== */
+let cropper = null;
+let cropResolve = null;
+let cropUrl = null;
+
+function openCropperFromBlob(blob) {
+  return new Promise((resolve) => {
+    cropResolve = resolve;
+    const img = document.getElementById('cropImg');
+    const modal = document.getElementById('cropModal');
+
+    if (cropper) { try { cropper.destroy(); } catch {} cropper = null; }
+    if (cropUrl) { URL.revokeObjectURL(cropUrl); cropUrl = null; }
+
+    cropUrl = URL.createObjectURL(blob);
+    img.onload = () => {
+      if (cropper) { try { cropper.destroy(); } catch {} }
+      cropper = new Cropper(img, {
+        viewMode: 1,
+        movable: true,
+        zoomable: true,
+        responsive: true,
+        background: false,
+        autoCropArea: 0.85,
+        dragMode: 'move',
+        minContainerWidth: 320,
+        minContainerHeight: 240,
+      });
+    };
+    img.src = cropUrl;
+
+    modal.style.display = 'grid';
+  });
 }
+
+function closeCropper() {
+  const modal = document.getElementById('cropModal');
+  modal.style.display = 'none';
+  if (cropper) { try { cropper.destroy(); } catch {} cropper = null; }
+  if (cropUrl) { URL.revokeObjectURL(cropUrl); cropUrl = null; }
+}
+
+$('cropCancel').addEventListener('click', () => {
+  closeCropper();
+  if (cropResolve) { cropResolve(null); cropResolve = null; } // batal → pakai gambar asli
+});
+
+$('cropUse').addEventListener('click', () => {
+  if (!cropper) return;
+  const canvas = cropper.getCroppedCanvas({ maxWidth: 4096, maxHeight: 4096 });
+  canvas.toBlob((blob) => {
+    closeCropper();
+    if (cropResolve) { cropResolve(blob); cropResolve = null; }
+  }, 'image/png', 0.92);
+});
+
+/* ====== Pipeline utama ====== */
+async function handleBlobAsFile(blob, filename) {
+  try {
+    // buka cropper; kalau user batal, pakai gambar asli
+    const cropped = await openCropperFromBlob(blob);
+    const finalBlob = cropped || blob;
+    const file = new File([finalBlob], filename, { type: finalBlob.type || 'image/png' });
+    await handleFile(file);
+  } catch(e) {
+    showError(e?.message || 'Gagal memproses gambar.');
+  }
+}
+
 async function handleFile(file){
   tbody.innerHTML=''; table.style.display='none';
   hideError(); statusEl.textContent='Memproses...';
@@ -211,9 +297,11 @@ async function handleFile(file){
     const emv = parseEMV(text);
     const row = simplifyQRIS(emv, text);
     appendRow(row);
-    table.style.display = ''; statusEl.textContent = '';
+    table.style.display = '';
+    statusEl.textContent = '';
   }catch(e){ statusEl.textContent = ''; showError(e.message || 'QR tidak terbaca'); }
 }
+
 function appendRow(row){
   const tr = document.createElement('tr');
   tr.innerHTML = `
@@ -225,12 +313,12 @@ function appendRow(row){
   tbody.appendChild(tr);
 }
 
-/* Utils */
+/* ====== Utils ====== */
 function esc(s){ const map = { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;', "'":'&#39;' }; return String(s ?? '').replace(/[&<>"']/g, ch => map[ch]); }
 function showError(msg){ errEl.textContent = msg; errEl.style.display = 'block'; }
 function hideError(){ errEl.style.display = 'none'; errEl.textContent = ''; }
 
-/* jsQR */
+/* ====== jsQR decode ====== */
 async function decodeQRFromImage(file){
   const img = await createImageBitmap(file);
   const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
@@ -240,9 +328,10 @@ async function decodeQRFromImage(file){
   return code && code.data ? code.data.trim() : '';
 }
 
-/* QRIS parsing ringkas */
+/* ====== EMV/QRIS parsing ringkas ====== */
 function parseTLV(s){ const out={}; let i=0; while(i+4<=s.length){ const id=s.slice(i,i+2); i+=2; const len=parseInt(s.slice(i,i+2),10); i+=2; out[id]=s.slice(i,i+len); i+=len; } return out; }
 function parseEMV(raw){ const tlv=parseTLV(raw), mais=[]; for(let id=26; id<=51; id++){ const k=String(id).padStart(2,'0'); if(tlv[k]) mais.push({id:k, tlv:parseTLV(tlv[k])}); } return {tlv, mais, raw}; }
+
 const STOPWORDS=new Set(['qris','www','id','co','com','pay','payment','merchant','account','qr','indo','indonesia']);
 function extractProviderName(emv){
   let best=''; const score=s=>{ const t=(s||'').trim(); if(!t) return 0; const L=(t.match(/[A-Za-z]/g)||[]).length; const D=(t.match(/[0-9]/g)||[]).length; return L-D*2+Math.min(L,12); };
@@ -279,7 +368,7 @@ function extractMID(emv){
   }
   for(const mai of emv.mais){
     const mid01=mai.tlv && mai.tlv['01']? String(mai.tlv['01']).trim():'';
-    if(mid01) return mid01;
+    if (mid01) return mid01;
   }
   return '';
 }
@@ -291,6 +380,8 @@ function simplifyQRIS(emv, raw){
   const rawShort=raw;
   return { merchantName, provider, mid, category, rawShort };
 }
+
+/* Error global ke UI */
 window.addEventListener('error', e => { showError('Error: ' + (e.message||e)); });
 </script>
 </body>
