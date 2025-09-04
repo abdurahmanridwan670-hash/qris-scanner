@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>QRIS Scanner</title>
 
-  <!-- Tema & layout -->
   <style>
     :root{ --orange:#da3c3e; --bg:#f2efed; --header:#fff0e6; }
     *,*::before,*::after{ box-sizing:border-box; }
@@ -21,37 +20,44 @@
       padding:28px; box-shadow:0 14px 36px rgba(0,0,0,.13);
       max-height:calc(100dvh - 160px); overflow:auto; scrollbar-gutter:stable both-edges;
     }
-    .uploader{display:flex; align-items:center; justify-content:center; gap:12px; margin-top:6px; flex-wrap:wrap}
+
+    .uploader{display:flex; align-items:center; justify-content:center; gap:16px; margin-top:6px; flex-wrap:wrap}
     #fileInput{display:none}
+
+    /* kotak besar untuk drag-drop */
     .dropzone{
-      display:block; text-align:center; font-weight:700; font-size:18px; color:var(--orange);
-      background:#fff; cursor:pointer; border:2px dashed var(--orange); border-radius:14px;
-      width:clamp(320px, 60%, 720px); padding:16px 22px; margin-inline:auto;
+      display:flex; align-items:center; justify-content:center; text-align:center;
+      font-weight:800; font-size:20px; color:var(--orange);
+      background:#fff; cursor:pointer; border:2px dashed var(--orange); border-radius:16px;
+      width:min(100%, 980px); height:180px;  /* <<< lebih besar */
+      padding:16px 22px; margin-inline:auto;
+      transition:background .2s ease, transform .1s ease;
     }
-    .dropzone.drag{ background:var(--header); }
+    .dropzone.drag{ background:var(--header); transform:scale(1.01); }
+
     .btn{
       border:2px solid var(--orange); color:#fff; background:var(--orange);
       padding:14px 18px; border-radius:12px; font-weight:700; font-size:16px; cursor:pointer;
     }
     .btn.secondary{ background:#fff; color:var(--orange); border-style:dashed }
     .btn:disabled{filter:grayscale(.6) opacity(.7); cursor:not-allowed}
-    .hint{font-size:12px; color:#6b7280; text-align:center; margin-top:6px}
+
+    .hint{font-size:12px; color:#6b7280; text-align:center; margin-top:8px}
+    .kbd{padding:2px 6px;border:1px solid #ddd;border-bottom-width:2px;border-radius:6px;background:#fafafa;font-family:ui-monospace,monospace}
+
     table{width:100%; border-collapse:collapse; margin-top:22px; table-layout:fixed}
     th,td{padding:14px 16px; border-bottom:1px solid #eee; text-align:left; vertical-align:top}
     th{background:var(--header); color:var(--orange); font-size:18px; font-weight:800}
     td{font-size:16px; line-height:1.6}
     .raw{white-space:normal; word-break:break-all}
+
     .small{font-size:14px; color:#6b7280; text-align:center}
     .alert{display:none; margin:16px auto 0; max-width:840px; padding:12px 16px;
       border:1px solid #f5b2a2; background:#fff7f2; color:#8c2a15; border-radius:10px; text-align:center; font-weight:700}
-    .kbd{padding:2px 6px;border:1px solid #ddd;border-bottom-width:2px;border-radius:6px;background:#fafafa;font-family:ui-monospace,monospace}
   </style>
 
-  <!-- jsQR untuk baca QR -->
+  <!-- jsQR untuk decoding QR -->
   <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
-  <!-- Cropper.js untuk crop/snipping -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cropperjs@1.6.2/dist/cropper.min.css">
-  <script src="https://cdn.jsdelivr.net/npm/cropperjs@1.6.2/dist/cropper.min.js"></script>
 </head>
 <body>
   <div class="center">
@@ -59,10 +65,9 @@
 
     <div class="card">
       <div class="uploader" id="uploader">
-        <label class="dropzone" for="fileInput" id="dropzone">Upload/Drag image</label>
+        <label class="dropzone" for="fileInput" id="dropzone">Upload/Drag image/Paste</label>
         <input id="fileInput" type="file" accept="image/*" />
         <button id="screenBtn" class="btn">Capture (Screen)</button>
-        <button id="clipBtn" class="btn secondary" title="Ambil gambar dari clipboard (jika diizinkan browser)">Ambil dari Clipboard</button>
       </div>
       <div class="hint" id="osHint"></div>
 
@@ -84,22 +89,6 @@
     </div>
   </div>
 
-  <!-- Crop Modal -->
-  <div id="cropModal" style="
-    position:fixed; inset:0; display:none; place-items:center;
-    background:rgba(0,0,0,.5); z-index:9999;">
-    <div style="background:#fff; border-radius:12px; padding:16px; width:min(92vw, 980px); max-height:92vh; display:grid; gap:12px;">
-      <div style="font-weight:700; color:#333;">Pilih area QR yang mau di-scan</div>
-      <div style="overflow:auto; max-height:70vh;">
-        <img id="cropImg" style="max-width:100%; display:block;">
-      </div>
-      <div style="display:flex; gap:8px; justify-content:flex-end;">
-        <button id="cropCancel" class="btn secondary">Batal</button>
-        <button id="cropUse" class="btn">Gunakan Area</button>
-      </div>
-    </div>
-  </div>
-
 <script>
 /* ====== Helper DOM ====== */
 const $ = id => document.getElementById(id);
@@ -110,15 +99,14 @@ const statusEl = $('status');
 const errEl = $('err');
 const dz = $('dropzone');
 const screenBtn = $('screenBtn');
-const clipBtn = $('clipBtn');
 const osHint = $('osHint');
 
-/* ====== OS hint ====== */
+/* ====== OS hint (untuk paste) ====== */
 (() => {
   const isMac = navigator.platform.toLowerCase().includes('mac');
   osHint.innerHTML = isMac
-    ? `Tips cepat: tekan <span class="kbd">Shift</span>+<span class="kbd">Cmd</span>+<span class="kbd">4</span> lalu <b>Cmd + V</b> di sini (paste).`
-    : `Tips cepat: tekan <span class="kbd">Win</span>+<span class="kbd">Shift</span>+<span class="kbd">S</span> lalu <b>Ctrl + V</b> di sini (paste).`;
+    ? `Tips: kamu bisa paste langsung dari clipboard (mis. <span class="kbd">Shift</span>+<span class="kbd">Cmd</span>+<span class="kbd">4</span> lalu <b>Cmd+V</b> di sini).`
+    : `Tips: kamu bisa paste langsung dari clipboard (mis. <span class="kbd">Win</span>+<span class="kbd">Shift</span>+<span class="kbd">S</span> lalu <b>Ctrl+V</b> di sini).`;
 })();
 
 /* ====== Upload & drag/drop & paste ====== */
@@ -149,24 +137,11 @@ window.addEventListener('paste', e => {
   }
 });
 
-/* ====== Clipboard API button ====== */
-clipBtn.addEventListener('click', async () => {
-  try{
-    if (!navigator.clipboard?.read) throw new Error('Browser belum mengizinkan akses clipboard gambar.');
-    const items = await navigator.clipboard.read();
-    for (const item of items) {
-      const type = item.types.find(t => t.startsWith('image/'));
-      if (type) { const blob = await item.getType(type); return handleBlobAsFile(blob, 'clipboard.png'); }
-    }
-    throw new Error('Tidak ada gambar di clipboard.');
-  }catch(e){ showError(e.message || 'Clipboard tidak dapat diakses.'); }
-});
-
-/* ====== Screen capture ====== */
+/* ====== Screen capture sekali (pilih tab/window/screen) ====== */
 let deniedCount = 0;
 screenBtn.addEventListener('click', () => {
   if (!navigator.mediaDevices?.getDisplayMedia) {
-    showError('Browser tidak mendukung Screen Capture. Pakai Upload / Paste.'); return;
+    showError('Browser tidak mendukung Screen Capture. Pakai Upload/Drag/Paste.'); return;
   }
   try { window.focus(); } catch {}
   if (navigator.userActivation && !navigator.userActivation.isActive) {
@@ -179,20 +154,14 @@ screenBtn.addEventListener('click', () => {
   })
   .then(async (stream) => {
     hideError(); statusEl.textContent = 'Mengambil gambar...';
-    const track = stream.getVideoTracks()[0];
-    let bitmap;
-    if ('ImageCapture' in window) {
-      try { bitmap = await new ImageCapture(track).grabFrame(); }
-      catch { bitmap = await frameFromVideo(stream); }
-    } else { bitmap = await frameFromVideo(stream); }
-
-    const canvas = document.createElement('canvas');
-    canvas.width = bitmap.width; canvas.height = bitmap.height;
-    canvas.getContext('2d').drawImage(bitmap, 0, 0);
-    const blob = await new Promise(res => canvas.toBlob(res, 'image/png', 0.92));
+    const frame = await frameFromVideo(stream);
+    const c = document.createElement('canvas');
+    c.width = frame.width; c.height = frame.height;
+    c.getContext('2d').drawImage(frame, 0, 0);
+    const blob = await new Promise(r => c.toBlob(r, 'image/png', 0.92));
     stream.getTracks().forEach(t => t.stop());
     if (!blob) throw new Error('Gagal mengambil gambar layar');
-    statusEl.textContent = 'Memproses gambar...';
+    statusEl.textContent = 'Memproses...';
     await handleBlobAsFile(blob, 'screenshot.png');
     statusEl.textContent = '';
   })
@@ -201,7 +170,7 @@ screenBtn.addEventListener('click', () => {
     let msg = e?.message || 'Tidak bisa mengambil screenshot.';
     if (e?.name === 'NotAllowedError') {
       deniedCount++; if (deniedCount >= 2) screenBtn.style.display = 'none';
-      msg = 'Akses ditolak. Gunakan Upload / Paste. Cek izin “Screen share” di Site settings (ikon gembok).';
+      msg = 'Akses ditolak. Pilih sumber layar & Share. Atau pakai Upload/Drag/Paste.';
     } else if (e?.name === 'NotFoundError') msg = 'Tidak ada sumber layar yang dipilih.';
     else if (e?.name === 'NotReadableError') msg = 'Sumber layar sedang dipakai app lain.';
     showError(msg + ` [${e?.name||'Err'}]`);
@@ -219,69 +188,10 @@ async function frameFromVideo(stream){
   return await createImageBitmap(c);
 }
 
-/* ====== Cropper (snipping) ====== */
-let cropper = null;
-let cropResolve = null;
-let cropUrl = null;
-
-function openCropperFromBlob(blob) {
-  return new Promise((resolve) => {
-    cropResolve = resolve;
-    const img = document.getElementById('cropImg');
-    const modal = document.getElementById('cropModal');
-
-    if (cropper) { try { cropper.destroy(); } catch {} cropper = null; }
-    if (cropUrl) { URL.revokeObjectURL(cropUrl); cropUrl = null; }
-
-    cropUrl = URL.createObjectURL(blob);
-    img.onload = () => {
-      if (cropper) { try { cropper.destroy(); } catch {} }
-      cropper = new Cropper(img, {
-        viewMode: 1,
-        movable: true,
-        zoomable: true,
-        responsive: true,
-        background: false,
-        autoCropArea: 0.85,
-        dragMode: 'move',
-        minContainerWidth: 320,
-        minContainerHeight: 240,
-      });
-    };
-    img.src = cropUrl;
-
-    modal.style.display = 'grid';
-  });
-}
-
-function closeCropper() {
-  const modal = document.getElementById('cropModal');
-  modal.style.display = 'none';
-  if (cropper) { try { cropper.destroy(); } catch {} cropper = null; }
-  if (cropUrl) { URL.revokeObjectURL(cropUrl); cropUrl = null; }
-}
-
-$('cropCancel').addEventListener('click', () => {
-  closeCropper();
-  if (cropResolve) { cropResolve(null); cropResolve = null; } // batal → pakai gambar asli
-});
-
-$('cropUse').addEventListener('click', () => {
-  if (!cropper) return;
-  const canvas = cropper.getCroppedCanvas({ maxWidth: 4096, maxHeight: 4096 });
-  canvas.toBlob((blob) => {
-    closeCropper();
-    if (cropResolve) { cropResolve(blob); cropResolve = null; }
-  }, 'image/png', 0.92);
-});
-
 /* ====== Pipeline utama ====== */
 async function handleBlobAsFile(blob, filename) {
   try {
-    // buka cropper; kalau user batal, pakai gambar asli
-    const cropped = await openCropperFromBlob(blob);
-    const finalBlob = cropped || blob;
-    const file = new File([finalBlob], filename, { type: finalBlob.type || 'image/png' });
+    const file = new File([blob], filename, { type: blob.type || 'image/png' });
     await handleFile(file);
   } catch(e) {
     showError(e?.message || 'Gagal memproses gambar.');
@@ -290,16 +200,16 @@ async function handleBlobAsFile(blob, filename) {
 
 async function handleFile(file){
   tbody.innerHTML=''; table.style.display='none';
-  hideError(); statusEl.textContent='Memproses...';
+  hideError(); statusEl.textContent='Memindai QR...';
   try{
     const text = await decodeQRFromImage(file);
-    if(!text) throw new Error('QR tidak terbaca');
+    if(!text) throw new Error('QR tidak terbaca / tidak ditemukan.');
     const emv = parseEMV(text);
     const row = simplifyQRIS(emv, text);
     appendRow(row);
     table.style.display = '';
     statusEl.textContent = '';
-  }catch(e){ statusEl.textContent = ''; showError(e.message || 'QR tidak terbaca'); }
+  }catch(e){ statusEl.textContent = ''; showError(e.message || 'QR tidak terbaca.'); }
 }
 
 function appendRow(row){
@@ -318,14 +228,30 @@ function esc(s){ const map = { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;', "
 function showError(msg){ errEl.textContent = msg; errEl.style.display = 'block'; }
 function hideError(){ errEl.style.display = 'none'; errEl.textContent = ''; }
 
-/* ====== jsQR decode ====== */
+/* ====== jsQR decode (multi-scale agar lebih robust) ====== */
 async function decodeQRFromImage(file){
-  const img = await createImageBitmap(file);
-  const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
-  const ctx = c.getContext('2d'); ctx.drawImage(img,0,0);
-  const data = ctx.getImageData(0,0,c.width,c.height);
-  const code = jsQR(data.data, data.width, data.height);
-  return code && code.data ? code.data.trim() : '';
+  const bmp = await createImageBitmap(file);
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+  // beberapa skala: asli, mengecil & sedikit membesar
+  const scales = [1, 0.75, 0.5, 1.25, 1.5];
+
+  for (const s of scales) {
+    const w = Math.max(30, Math.round(bmp.width * s));
+    const h = Math.max(30, Math.round(bmp.height * s));
+    canvas.width = w; canvas.height = h;
+    ctx.clearRect(0,0,w,h);
+    ctx.drawImage(bmp, 0, 0, w, h);
+
+    const data = ctx.getImageData(0, 0, w, h);
+    const code = jsQR(data.data, data.width, data.height);
+
+    if (code && code.data) {
+      return code.data.trim();
+    }
+  }
+  return '';
 }
 
 /* ====== EMV/QRIS parsing ringkas ====== */
