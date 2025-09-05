@@ -35,7 +35,7 @@
     }
     .dropzone.drag{ background:var(--header); transform:scale(1.01); }
 
-    .btn{
+    .btn{ /* tidak terpakai saat ini, disisakan jika nanti butuh tombol lain */
       border:2px solid var(--orange); color:#fff; background:var(--orange);
       padding:14px 18px; border-radius:12px; font-weight:700; font-size:16px; cursor:pointer;
     }
@@ -67,7 +67,6 @@
       <div class="uploader" id="uploader">
         <label class="dropzone" for="fileInput" id="dropzone">Upload/Drag image/Paste</label>
         <input id="fileInput" type="file" accept="image/*" />
-        <button id="screenBtn" class="btn">Capture (Screen)</button>
       </div>
       <div class="hint" id="osHint"></div>
 
@@ -98,7 +97,6 @@ const tbody = table.querySelector('tbody');
 const statusEl = $('status');
 const errEl = $('err');
 const dz = $('dropzone');
-const screenBtn = $('screenBtn');
 const osHint = $('osHint');
 
 /* ====== OS hint (untuk paste) ====== */
@@ -121,6 +119,7 @@ fileInput.addEventListener('change', () => {
 ['dragleave','drop'].forEach(ev =>
   document.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove('drag'); })
 );
+
 document.addEventListener('drop', e => {
   const f = e.dataTransfer?.files?.[0];
   if (f) handleBlobAsFile(f, f.name || 'drop.png');
@@ -136,57 +135,6 @@ window.addEventListener('paste', e => {
     }
   }
 });
-
-/* ====== Screen capture sekali (pilih tab/window/screen) ====== */
-let deniedCount = 0;
-screenBtn.addEventListener('click', () => {
-  if (!navigator.mediaDevices?.getDisplayMedia) {
-    showError('Browser tidak mendukung Screen Capture. Pakai Upload/Drag/Paste.'); return;
-  }
-  try { window.focus(); } catch {}
-  if (navigator.userActivation && !navigator.userActivation.isActive) {
-    showError('Klik tombol lagi (gesture tidak terdeteksi).'); return;
-  }
-
-  navigator.mediaDevices.getDisplayMedia({
-    video: { preferCurrentTab: true, displaySurface: 'browser', logicalSurface: true },
-    audio: false, surfaceSwitching: 'include'
-  })
-  .then(async (stream) => {
-    hideError(); statusEl.textContent = 'Mengambil gambar...';
-    const frame = await frameFromVideo(stream);
-    const c = document.createElement('canvas');
-    c.width = frame.width; c.height = frame.height;
-    c.getContext('2d').drawImage(frame, 0, 0);
-    const blob = await new Promise(r => c.toBlob(r, 'image/png', 0.92));
-    stream.getTracks().forEach(t => t.stop());
-    if (!blob) throw new Error('Gagal mengambil gambar layar');
-    statusEl.textContent = 'Memproses...';
-    await handleBlobAsFile(blob, 'screenshot.png');
-    statusEl.textContent = '';
-  })
-  .catch((e) => {
-    statusEl.textContent = '';
-    let msg = e?.message || 'Tidak bisa mengambil screenshot.';
-    if (e?.name === 'NotAllowedError') {
-      deniedCount++; if (deniedCount >= 2) screenBtn.style.display = 'none';
-      msg = 'Akses ditolak. Pilih sumber layar & Share. Atau pakai Upload/Drag/Paste.';
-    } else if (e?.name === 'NotFoundError') msg = 'Tidak ada sumber layar yang dipilih.';
-    else if (e?.name === 'NotReadableError') msg = 'Sumber layar sedang dipakai app lain.';
-    showError(msg + ` [${e?.name||'Err'}]`);
-  });
-});
-
-async function frameFromVideo(stream){
-  const video = document.createElement('video');
-  video.srcObject = stream; await video.play();
-  await new Promise(r => setTimeout(r, 200));
-  const c = document.createElement('canvas');
-  c.width = video.videoWidth; c.height = video.videoHeight;
-  c.getContext('2d').drawImage(video, 0, 0);
-  video.pause();
-  return await createImageBitmap(c);
-}
 
 /* ====== Pipeline utama ====== */
 async function handleBlobAsFile(blob, filename) {
